@@ -69,12 +69,12 @@ const KEY = (typeof body.api_key === "string" && body.api_key.trim()) ? body.api
 if (!KEY) return new Response(JSON.stringify({ error: "No Anthropic API key configured. Add one in the app under Settings, or set ANTHROPIC_API_KEY in Supabase." }), { status: 400, headers: { "Content-Type": "application/json", ...CORS } })
 
 async function claudeText(messages: object[], system?: string, maxTokens = 1500): Promise<string> {
-const body: Record<string, unknown> = { model: "claude-sonnet-4-6", max_tokens: maxTokens, messages }
-if (system) body.system = system
+const payload: Record<string, unknown> = { model: "claude-sonnet-4-6", max_tokens: maxTokens, messages }
+if (system) payload.system = system
 const res = await fetch("https://api.anthropic.com/v1/messages", {
 method: "POST",
 headers: { "Content-Type": "application/json", "x-api-key": KEY, "anthropic-version": "2023-06-01" },
-body: JSON.stringify(body),
+body: JSON.stringify(payload),
 })
 const data = await res.json()
 return (data.content || []).filter((b: {type:string}) => b.type === "text").map((b: {text:string}) => b.text).join("\n")
