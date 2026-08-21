@@ -1,30 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
-const KEY = Deno.env.get("ANTHROPIC_API_KEY")!
+const ENV_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
 
 const CORS = {
 "Access-Control-Allow-Origin": "*",
 "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-}
-
-async function claudeText(messages: object[], system?: string, maxTokens = 1500): Promise<string> {
-const body: Record<string, unknown> = { model: "claude-sonnet-4-6", max_tokens: maxTokens, messages }
-if (system) body.system = system
-const res = await fetch("https://api.anthropic.com/v1/messages", {
-method: "POST",
-headers: { "Content-Type": "application/json", "x-api-key": KEY, "anthropic-version": "2023-06-01" },
-body: JSON.stringify(body),
-})
-const data = await res.json()
-return (data.content || []).filter((b: {type:string}) => b.type === "text").map((b: {text:string}) => b.text).join("\n")
-}
-
-async function claudeJson(messages: object[], system?: string, maxTokens = 2000) {
-const text = await claudeText(messages, system, maxTokens)
-let t = text.trim().replace(/^```json\s*/i,"").replace(/^```\s*/,"").replace(/\s*```$/,"").trim()
-const a = t.indexOf("{"), b = t.lastIndexOf("}")
-if (a >= 0 && b > a) t = t.slice(a, b + 1)
-return JSON.parse(t)
 }
 
 const EXTRACT_PROMPT = `You are an assistant to a professional baker. Extract ALL recipe content from ALL images.
@@ -83,6 +63,31 @@ Deno.serve(async (req) => {
 if (req.method === "OPTIONS") return new Response(null, { headers: CORS })
 
 const body = await req.json()
+
+// A caller may supply its own key (app Settings); otherwise use the server secret.
+const KEY = (typeof body.api_key === "string" && body.api_key.trim()) ? body.api_key.trim() : ENV_KEY
+if (!KEY) return new Response(JSON.stringify({ error: "No Anthropic API key configured. Add one in the app under Settings, or set ANTHROPIC_API_KEY in Supabase." }), { status: 400, headers: { "Content-Type": "application/json", ...CORS } })
+
+async function claudeText(messages: object[], system?: string, maxTokens = 1500): Promise<string> {
+const body: Record<string, unknown> = { model: "claude-sonnet-4-6", max_tokens: maxTokens, messages }
+if (system) body.system = system
+const res = await fetch("https://api.anthropic.com/v1/messages", {
+method: "POST",
+headers: { "Content-Type": "application/json", "x-api-key": KEY, "anthropic-version": "2023-06-01" },
+body: JSON.stringify(body),
+})
+const data = await res.json()
+return (data.content || []).filter((b: {type:string}) => b.type === "text").map((b: {text:string}) => b.text).join("\n")
+}
+
+async function claudeJson(messages: object[], system?: string, maxTokens = 2000) {
+const text = await claudeText(messages, system, maxTokens)
+let t = text.trim().replace(/^```json\s*/i,"").replace(/^```\s*/,"").replace(/\s*```$/,"").trim()
+const a = t.indexOf("{"), b = t.lastIndexOf("}")
+if (a >= 0 && b > a) t = t.slice(a, b + 1)
+return JSON.parse(t)
+}
+
 
 try {
 let result: unknown
