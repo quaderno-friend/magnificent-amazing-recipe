@@ -2049,8 +2049,8 @@ function SettingsModal({onClose}){
   }
   const lbl={fontFamily:'var(--mono)',fontSize:10,textTransform:'uppercase',letterSpacing:'.12em',color:'var(--muted)',display:'block',marginBottom:5}
   return(
-    <div className="Q-app-ai-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
-      <div style={{background:'var(--paper)',borderRadius:12,width:'min(520px,94vw)',padding:'20px 22px',display:'flex',flexDirection:'column',gap:14,margin:'auto',border:'1px solid var(--rule)'}}>
+    <div className="Q-app-ai-overlay" style={{display:'flex',alignItems:'center',justifyContent:'center',padding:20,overflow:'auto'}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div style={{background:'var(--paper)',borderRadius:12,width:'min(520px,94vw)',padding:'20px 22px',display:'flex',flexDirection:'column',gap:14,border:'1px solid var(--rule)',boxShadow:'0 12px 40px rgba(0,0,0,.18)'}}>
         <div style={{display:'flex',alignItems:'baseline',gap:8}}>
           <h3 style={{fontFamily:'var(--serif)',fontSize:18,margin:0}}>Settings</h3>
           <button className="btn ghost xs" style={{marginLeft:'auto'}} onClick={onClose}>Close</button>
