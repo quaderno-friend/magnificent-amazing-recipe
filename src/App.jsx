@@ -568,7 +568,13 @@ function parseMediaLibrary(raw){
 
 /* ── Edge Function calls ──────────────────────────────────────────────────────────── */
 
-async function invoke(body){const{data,error}=await supabase.functions.invoke('extract-recipe',{body});if(error)throw new Error(error.message);if(data?.error)throw new Error(data.error);return data}
+const AI_KEY_STORE='qdaid_anthropic_key'
+function getApiKey(){try{return localStorage.getItem(AI_KEY_STORE)||''}catch(_){return''}}
+function setApiKey(k){try{if(k)localStorage.setItem(AI_KEY_STORE,k);else localStorage.removeItem(AI_KEY_STORE)}catch(_){}}
+// Attach the browser-stored key when there is one; otherwise the edge function
+// falls back to the ANTHROPIC_API_KEY secret held server-side in Supabase.
+function withKey(body){const k=getApiKey();return k?{...body,api_key:k}:body}
+async function invoke(body){const{data,error}=await supabase.functions.invoke('extract-recipe',{body:withKey(body)});if(error)throw new Error(error.message);if(data?.error)throw new Error(data.error);return data}
 
 const extractWithClaude=imgs=>invoke({images:imgs})
 const structureText=text=>invoke({type:'structure',text})
@@ -1123,7 +1129,7 @@ function IDPanel({recipe,onSave}){
       }
       let newCache={}
       if(ingsForAI.length>0){
-        const resp=await supabase.functions.invoke('extract-recipe',{body:{type:'analyze_macros',recipe_title:recipe.title,ingredients:ingsForAI}})
+        const resp=await supabase.functions.invoke('extract-recipe',{body:withKey({type:'analyze_macros',recipe_title:recipe.title,ingredients:ingsForAI})})
         if(resp.error)throw resp.error
         const json=resp.data
         newCache=json.cache||{}
@@ -1162,7 +1168,7 @@ function IDPanel({recipe,onSave}){
     if(!newParamLabel.trim())return
     setAnalyzingCustom(true)
     try{
-      const resp=await supabase.functions.invoke('extract-recipe',{body:{type:'analyze_custom_param',recipe_title:recipe.title,ingredients:(recipe.ingredients||[]).map(i=>({name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g'})),existing_macros:macros,param_label:newParamLabel.trim()}})
+      const resp=await supabase.functions.invoke('extract-recipe',{body:withKey({type:'analyze_custom_param',recipe_title:recipe.title,ingredients:(recipe.ingredients||[]).map(i=>({name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g'})),existing_macros:macros,param_label:newParamLabel.trim()})})
       if(resp.error)throw resp.error
       const json=resp.data
       const customParams=data.customParams||[]
@@ -2024,6 +2030,59 @@ function RecipeEditor({initial,onSave,onCancel}){
 
 /* ── App ──────────────────────────────────────────────────────────── */
 
+function SettingsModal({onClose}){
+  const[val,setVal]=useState(()=>getApiKey())
+  const[reveal,setReveal]=useState(false)
+  const[busy,setBusy]=useState(false)
+  const[msg,setMsg]=useState(null)
+  const stored=getApiKey()
+  function save(){setApiKey(val.trim());setMsg({ok:true,text:val.trim()?'Key saved in this browser.':'Key removed. The app will use the server key instead.'})}
+  async function saveAndTest(){
+    setApiKey(val.trim());setBusy(true);setMsg(null)
+    try{
+      const r=await invoke({type:'format_note',transcript:'ping'})
+      const got=r&&typeof r.text==='string'&&r.text.trim()
+      setMsg(got?{ok:true,text:'Working — Claude replied.'}
+                :{ok:false,text:'The function answered but Claude returned nothing. The key is missing or invalid.'})
+    }catch(e){setMsg({ok:false,text:'Failed: '+e.message})}
+    finally{setBusy(false)}
+  }
+  const lbl={fontFamily:'var(--mono)',fontSize:10,textTransform:'uppercase',letterSpacing:'.12em',color:'var(--muted)',display:'block',marginBottom:5}
+  return(
+    <div className="Q-app-ai-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div style={{background:'var(--paper)',borderRadius:12,width:'min(520px,94vw)',padding:'20px 22px',display:'flex',flexDirection:'column',gap:14,margin:'auto',border:'1px solid var(--rule)'}}>
+        <div style={{display:'flex',alignItems:'baseline',gap:8}}>
+          <h3 style={{fontFamily:'var(--serif)',fontSize:18,margin:0}}>Settings</h3>
+          <button className="btn ghost xs" style={{marginLeft:'auto'}} onClick={onClose}>Close</button>
+        </div>
+        <div>
+          <label style={lbl} htmlFor="anthropic-key">Anthropic API key</label>
+          <div style={{display:'flex',gap:6}}>
+            <input id="anthropic-key" type={reveal?'text':'password'} value={val} autoComplete="off" spellCheck="false"
+              onChange={e=>setVal(e.target.value)} placeholder="sk-ant-..."
+              style={{flex:1,border:'1px solid var(--rule)',borderRadius:6,padding:'7px 10px',fontSize:12.5,fontFamily:'var(--mono)',color:'var(--ink)',background:'var(--surface)'}}/>
+            <button className="btn ghost xs" onClick={()=>setReveal(r=>!r)}>{reveal?'Hide':'Show'}</button>
+          </div>
+          <p style={{fontSize:11.5,lineHeight:1.5,color:'var(--muted)',margin:'8px 0 0'}}>
+            Powers photo extraction, both assistants, and macro analysis. Get one at console.anthropic.com.
+            Stored in this browser only — never sent to the database and never committed to the repo.
+            Leave it empty to use the key configured on the server.
+          </p>
+        </div>
+        <div style={{display:'flex',gap:7,flexWrap:'wrap',alignItems:'center'}}>
+          <button className="btn ai xs" onClick={saveAndTest} disabled={busy}>{busy?'Testing…':'Save & test'}</button>
+          <button className="btn ghost xs" onClick={save} disabled={busy}>Save only</button>
+          {stored&&<button className="btn danger xs" disabled={busy} onClick={()=>{setApiKey('');setVal('');setMsg({ok:true,text:'Key removed from this browser.'})}}>Remove</button>}
+          <span style={{fontFamily:'var(--mono)',fontSize:9.5,color:'var(--muted)',marginLeft:'auto'}}>
+            {stored?'key stored in browser':'using server key'}
+          </span>
+        </div>
+        {msg&&<div style={{fontSize:12,lineHeight:1.5,padding:'9px 11px',borderRadius:7,border:'1px solid var(--rule)',borderLeft:'3px solid '+(msg.ok?'var(--green)':'var(--red)'),color:msg.ok?'var(--green)':'var(--red)',background:'var(--surface)'}}>{msg.text}</div>}
+      </div>
+    </div>
+  )
+}
+
 export default function App(){
   const[recipes,setRecipes]=useState([])
   const[loading,setLoading]=useState(true)
@@ -2036,6 +2095,7 @@ export default function App(){
   const[showAppAI,setShowAppAI]=useState(false)
   const[showCompare,setShowCompare]=useState(false)
   const[showLibrary,setShowLibrary]=React.useState(false)
+  const[showSettings,setShowSettings]=useState(false)
   const[categorizingAI,setCategorizingAI]=useState(false)
   useEffect(()=>{dbLoad().then(data=>{setRecipes(data);if(data[0])setSelId(data[0].id)}).catch(e=>setSaveErr('Load failed: '+e.message)).finally(()=>setLoading(false))},[])
   function openRecipe(id){
@@ -2094,7 +2154,7 @@ export default function App(){
     setSaveErr('')
     setCategorizingAI(true)
     try{
-      const{data,error}=await supabase.functions.invoke('extract-recipe',{body:{type:'auto_categorize',recipes:uncategorized.map(r=>({id:r.id,title:r.title,category:'',ingredients:(r.ingredients||[]).slice(0,8)}))}})
+      const{data,error}=await supabase.functions.invoke('extract-recipe',{body:withKey({type:'auto_categorize',recipes:uncategorized.map(r=>({id:r.id,title:r.title,category:'',ingredients:(r.ingredients||[]).slice(0,8)}))})})
       if(error)throw new Error(error.message)
       for(const u of(data?.updates||[])){const rec=recipes.find(r=>r.id===u.id);if(rec){const saved=await dbUpdate({...rec,category:u.category});setRecipes(p=>p.map(r=>r.id===saved.id?saved:r))}}
       alert('Categorized '+(data?.updates?.length||0)+' recipes.')
@@ -2134,6 +2194,7 @@ export default function App(){
           <button className="btn id xs" onClick={()=>setShowCompare(true)} title="Compare recipes">⚖ Compare</button>
           <button className="btn id xs" onClick={()=>setShowLibrary(true)} title="Ingredient Library">&#x1F4E6; Library</button>
           <button className="btn ai xs" onClick={()=>setShowAppAI(true)} title="App AI Assistant">🌐 AI</button>
+          <button className="btn ghost xs" onClick={()=>setShowSettings(true)} title="Settings" aria-label="Settings">⚙</button>
           <button className="btn amber" onClick={()=>{setMode('new');setSelId(null)}}>＋ New</button>
         </div>
       </header>
@@ -2201,6 +2262,7 @@ export default function App(){
       )}
       {showCompare&&<ComparePanel recipes={recipes} onClose={()=>setShowCompare(false)}/>}
       {showLibrary&&<IngredientLibraryModal onClose={()=>setShowLibrary(false)}/>}
+      {showSettings&&<SettingsModal onClose={()=>setShowSettings(false)}/>}
     </div>
   )
 }
